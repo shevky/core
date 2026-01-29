@@ -1,6 +1,6 @@
 {
   "name": "@shevky/core",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A minimal, dependency-light static site generator.",
   "type": "module",
   "main": "shevky.js",
@@ -9,7 +9,11 @@
   },
   "files": [
     "shevky.js",
+    "lib/",
+    "engines/",
+    "registries/",
     "scripts/",
+    "types/",
     "README.md",
     "LICENSE"
   ],
