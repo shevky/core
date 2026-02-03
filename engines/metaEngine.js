@@ -137,6 +137,7 @@ class MetaEngine {
       quote,
       home: this.resolveLanguageHomePath(lang),
       url: _cfg.identity.url,
+      ui: _cfg.ui ?? {},
       currentLanguage: lang,
       currentCulture: _i18n.culture(lang),
       currentCanonical: (() => {

@@ -87,6 +87,7 @@ export class PluginEngine {
       ...(hook === _plugin.hooks.CONTENT_LOAD
         ? {
             contentFiles: this.#_contentRegistry.files,
+            addContent: (input) => this.#_contentRegistry.addContent(input),
           }
         : {}),
       ...(hook === _plugin.hooks.CONTENT_READY && this.#_metaEngine

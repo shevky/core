@@ -52,9 +52,7 @@ export class ContentRegistry {
       this.#_cache.push(contentFile);
     }
 
-    this.#_collectionsCache = null;
-    this.#_footerPoliciesCache = null;
-    this.#_contentIndexCache = null;
+    this.#_resetCaches();
   }
 
   get count() {
@@ -63,6 +61,39 @@ export class ContentRegistry {
 
   get files() {
     return this.#_cache;
+  }
+
+  /**
+   * @param {import("../types/index.d.ts").ContentFileLike | ContentFile} input
+   */
+  addContent(input) {
+    if (!input) {
+      return;
+    }
+
+    if (input instanceof ContentFile) {
+      this.#_cache.push(input);
+      this.#_resetCaches();
+      return;
+    }
+
+    const header =
+      input.header && typeof input.header === "object" ? input.header : {};
+    const content =
+      typeof input.content === "string"
+        ? input.content
+        : typeof input.body?.content === "string"
+          ? input.body.content
+          : "";
+    const sourcePath =
+      typeof input.sourcePath === "string"
+        ? input.sourcePath
+        : "plugin://content/unknown.md";
+    const isValid = typeof input.isValid === "boolean" ? input.isValid : true;
+
+    const contentFile = new ContentFile(header, content, sourcePath, isValid);
+    this.#_cache.push(contentFile);
+    this.#_resetCaches();
   }
 
   /**
@@ -244,6 +275,12 @@ export class ContentRegistry {
 
     const { data, content } = matterResponse;
     return new ContentFile(data, content, filePath, isValid);
+  }
+
+  #_resetCaches() {
+    this.#_collectionsCache = null;
+    this.#_footerPoliciesCache = null;
+    this.#_contentIndexCache = null;
   }
 
   /**

@@ -27,9 +27,28 @@ export type PluginInstance = {
 
 export type PluginLoadContext = BasePluginLoadContext;
 
+export type ContentHeaderLike = Record<string, any>;
+
+export type ContentBodyLike = {
+  content?: string;
+};
+
+export type ContentFileLike = {
+  header?: ContentHeaderLike;
+  body?: ContentBodyLike;
+  content?: string;
+  isValid?: boolean;
+  sourcePath?: string;
+};
+
 export interface PluginExecutionContext extends BasePluginContext {
   paths: ProjectPaths;
-  contentFiles?: import("@shevky/base").ContentFileLike[];
+  contentFiles?: ContentFileLike[];
+  addContent?: (
+    input:
+      | ContentFileLike
+      | import("../lib/contentFile.js").ContentFile
+  ) => void;
   pages?: CollectionsByLang;
   contentIndex?: Record<
     string,

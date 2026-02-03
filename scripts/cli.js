@@ -65,10 +65,10 @@ function help() {
     },
     {
       header: "Project Details",
-      content: "Project Home: {underline https://tatoglu.net/project/shevky}",
+      content: "Project Home: {underline https://shevky.github.io}",
     },
     {
-      content: "GitHub: {underline https://github.com/fatihtatoglu/shevky}",
+      content: "GitHub: {underline https://github.com/shevky}",
     },
   ];
 
