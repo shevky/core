@@ -517,7 +517,9 @@ export class RenderEngine {
       return;
     }
 
-    const configKeys = Object.keys(collectionsConfig);
+    const configKeys = Object.keys(collectionsConfig).filter(
+      (key) => key !== "includeContentFile",
+    );
     for (const configKey of configKeys) {
       const config = collectionsConfig[configKey];
       if (!config || typeof config !== "object") {

@@ -1,4 +1,4 @@
-import { io as _io } from "@shevky/base";
+import { io as _io, config as _cfg } from "@shevky/base";
 import matter from "gray-matter";
 
 import { ContentFile } from "../lib/contentFile.js";
@@ -202,6 +202,9 @@ export class ContentRegistry {
       return this.#_collectionsCache;
     }
 
+    const includeContentFile = Boolean(
+      _cfg?.content?.collections?.includeContentFile,
+    );
     /** @type {import("../types/index.d.ts").CollectionsByLang} */
     const pagesByLang = {};
     const contentFiles = this.files;
@@ -211,8 +214,10 @@ export class ContentRegistry {
       }
 
       const contentSummary = new ContentSummary(file);
+      const summaryBase = contentSummary.toObject();
       const summary = /** @type {import("../types/index.d.ts").CollectionEntry} */ ({
-        ...contentSummary.toObject(),
+        ...summaryBase,
+        ...(includeContentFile ? file.toObject() : {}),
         canonical: this.#_metaEngine.buildContentUrl(
           file.canonical,
           file.lang,

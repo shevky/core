@@ -91,6 +91,11 @@ export type CollectionEntry = ContentSummaryLike & {
   type?: string;
   seriesTitle?: string;
   canonical?: string;
+  header?: ContentHeaderLike;
+  body?: ContentBodyLike;
+  content?: string;
+  isValid?: boolean;
+  sourcePath?: string;
 };
 
 export type CollectionsByLang = Record<string, Record<string, CollectionEntry[]>>;
