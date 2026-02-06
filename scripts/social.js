@@ -1,6 +1,10 @@
 import { config as _cfg } from "@shevky/base";
 
 function getRss() {
+  if (!_cfg.identity.social.rss) {
+    return;
+  }
+
   return {
     key: "rss",
     tone: "rss",
