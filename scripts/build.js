@@ -48,6 +48,7 @@ const TEMPLATES_DIR = _prj.templatesDir;
 const ASSETS_DIR = _prj.assetsDir;
 const SITE_CONFIG_PATH = _prj.siteConfig;
 const I18N_CONFIG_PATH = _prj.i18nConfig;
+const FRAGMENTS_DIR = "fragments";
 
 const pluginRegistry = new PluginRegistry();
 const templateRegistry = new TemplateRegistry();
@@ -461,6 +462,100 @@ async function renderContentTemplate(
   listingOverride,
 ) {
   const template = templateRegistry.getTemplate(TYPE_TEMPLATE, templateName);
+  const {
+    normalizedFront,
+    listing,
+    collectionFlags,
+    site,
+    languageFlags,
+    resolvedDictionary,
+  } = buildContentRenderContext(front, lang, dictionary, listingOverride);
+
+  return Mustache.render(
+    template.content,
+    {
+      content: { html: decorateHtml(contentHtml, templateName) },
+      front: normalizedFront,
+      lang,
+      listing,
+      site,
+      locale: languageFlags.locale,
+      isEnglish: languageFlags.isEnglish,
+      isTurkish: languageFlags.isTurkish,
+      i18n: resolvedDictionary,
+      ...collectionFlags,
+    },
+    {
+      ...templateRegistry.getFiles(TYPE_PARTIAL),
+      ...templateRegistry.getFiles(TYPE_COMPONENT),
+    },
+  );
+}
+
+/**
+ * @param {string} contentHtml
+ * @param {FrontMatter} front
+ * @param {string} lang
+ * @param {Record<string, any>} dictionary
+ * @param {string} [templateName]
+ * @param {any} [listingOverride]
+ */
+async function renderFragmentTemplate(
+  contentHtml,
+  front,
+  lang,
+  dictionary,
+  templateName,
+  listingOverride,
+) {
+  const template =
+    typeof templateName === "string" && templateName.trim().length > 0
+      ? templateRegistry.getTemplate(TYPE_TEMPLATE, templateName.trim())
+      : null;
+  if (templateName && !template) {
+    _log.warn(`[build] Fragment template not found: ${templateName}`);
+  }
+  const {
+    normalizedFront,
+    listing,
+    collectionFlags,
+    site,
+    languageFlags,
+    resolvedDictionary,
+  } = buildContentRenderContext(front, lang, dictionary, listingOverride);
+  const decorated = decorateHtml(contentHtml, templateName ?? "");
+  const templateContent = template?.content ?? "{{{content.html}}}";
+
+  return Mustache.render(
+    templateContent,
+    {
+      content: { html: decorated },
+      contentHtml: decorated,
+      contentObject: { html: decorated },
+      front: normalizedFront,
+      lang,
+      listing,
+      site,
+      locale: languageFlags.locale,
+      isEnglish: languageFlags.isEnglish,
+      isTurkish: languageFlags.isTurkish,
+      i18n: resolvedDictionary,
+      ...collectionFlags,
+    },
+    {
+      ...templateRegistry.getFiles(TYPE_PARTIAL),
+      ...templateRegistry.getFiles(TYPE_COMPONENT),
+    },
+  );
+}
+
+/**
+ * @param {FrontMatter} front
+ * @param {string} lang
+ * @param {Record<string, any>} dictionary
+ * @param {any} [listingOverride]
+ */
+function buildContentRenderContext(front, lang, dictionary, listingOverride) {
   const baseFront = normalizeFrontMatter(front);
   /** @type {string[]} */
   const normalizedTags = Array.isArray(front.tags)
@@ -513,25 +608,14 @@ async function renderContentTemplate(
   const site = metaEngine.buildSiteData(lang);
   const languageFlags = _i18n.flags(lang);
 
-  return Mustache.render(
-    template.content,
-    {
-      content: { html: decorateHtml(contentHtml, templateName) },
-      front: normalizedFront,
-      lang,
-      listing,
-      site,
-      locale: languageFlags.locale,
-      isEnglish: languageFlags.isEnglish,
-      isTurkish: languageFlags.isTurkish,
-      i18n: resolvedDictionary,
-      ...collectionFlags,
-    },
-    {
-      ...templateRegistry.getFiles(TYPE_PARTIAL),
-      ...templateRegistry.getFiles(TYPE_COMPONENT),
-    },
-  );
+  return {
+    normalizedFront,
+    listing,
+    collectionFlags,
+    site,
+    languageFlags,
+    resolvedDictionary,
+  };
 }
 
 /**
@@ -595,6 +679,18 @@ function buildOutputPath(front, lang, slug) {
     segments.push(cleaned);
   }
   return _io.path.combine(...segments.filter(Boolean), "index.html");
+}
+
+/** @param {unknown} value */
+function resolveFragmentId(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.replace(/[\\/]/g, "-");
 }
 
 /** @param {string} value */
@@ -833,6 +929,13 @@ async function buildContentPages() {
       markdownHtml ?? "",
       placeholders,
     );
+    const rawFront = normalizeFrontMatter(file.header);
+    const shouldBuildFragment = _fmt.boolean(rawFront.fragment);
+    const fragmentTemplateName =
+      typeof rawFront.fragmentTemplate === "string" &&
+      rawFront.fragmentTemplate.trim().length > 0
+        ? rawFront.fragmentTemplate.trim()
+        : file.template;
 
     if (file.template === "collection" || file.template === "home") {
       await renderEngine.buildPaginatedCollectionPages({
@@ -918,6 +1021,48 @@ async function buildContentPages() {
         inputBytes: byteLength(file.content),
       },
     });
+
+    if (shouldBuildFragment) {
+      const fragmentId = resolveFragmentId(rawFront.id ?? file.id);
+      if (!fragmentId) {
+        _log.warn(
+          `[build] Fragment skipped for ${normalizeLogPath(file.sourcePath)} (missing id).`,
+        );
+      } else {
+        const fragmentHtml = await renderFragmentTemplate(
+          hydratedHtml,
+          file.header,
+          file.lang,
+          dictionary,
+          fragmentTemplateName,
+        );
+        const transformedFragment = await renderEngine.transformHtml(
+          fragmentHtml,
+          {
+            versionToken,
+            minifyHtml,
+          },
+        );
+        const fragmentLang =
+          typeof file.lang === "string" && file.lang.trim().length > 0
+            ? file.lang.trim()
+            : _i18n.default;
+        const fragmentPath = _io.path.combine(
+          FRAGMENTS_DIR,
+          fragmentLang,
+          `frag_${fragmentId}.html`,
+        );
+        GENERATED_PAGES.add(toPosixPath(fragmentPath));
+        await writeHtmlFile(fragmentPath, transformedFragment, {
+          action: "BUILD_FRAGMENT",
+          type: "fragment",
+          source: file.sourcePath,
+          lang: file.lang,
+          template: fragmentTemplateName,
+          inputBytes: byteLength(file.content),
+        });
+      }
+    }
   }
 
   await renderEngine.buildDynamicCollectionPages({
