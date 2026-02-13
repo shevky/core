@@ -1,4 +1,4 @@
-import { io as _io, config as _cfg } from "@shevky/base";
+import { io as _io, config as _cfg, log as _log } from "@shevky/base";
 import matter from "gray-matter";
 
 import { ContentFile } from "../lib/contentFile.js";
@@ -37,6 +37,7 @@ export class ContentRegistry {
     }
 
     const files = await _io.directory.read(path);
+    let hasChanges = false;
     for (const entry of files) {
       if (!entry.endsWith(".md")) {
         continue;
@@ -49,10 +50,14 @@ export class ContentRegistry {
       }
 
       const contentFile = await this.#_loadFromFile(filePath);
-      this.#_cache.push(contentFile);
+      if (this.#_addUniqueContent(contentFile)) {
+        hasChanges = true;
+      }
     }
 
-    this.#_resetCaches();
+    if (hasChanges) {
+      this.#_resetCaches();
+    }
   }
 
   get count() {
@@ -72,8 +77,9 @@ export class ContentRegistry {
     }
 
     if (input instanceof ContentFile) {
-      this.#_cache.push(input);
-      this.#_resetCaches();
+      if (this.#_addUniqueContent(input)) {
+        this.#_resetCaches();
+      }
       return;
     }
 
@@ -92,8 +98,9 @@ export class ContentRegistry {
     const isValid = typeof input.isValid === "boolean" ? input.isValid : true;
 
     const contentFile = new ContentFile(header, content, sourcePath, isValid);
-    this.#_cache.push(contentFile);
-    this.#_resetCaches();
+    if (this.#_addUniqueContent(contentFile)) {
+      this.#_resetCaches();
+    }
   }
 
   /**
@@ -324,5 +331,49 @@ export class ContentRegistry {
       });
     });
     return sorted;
+  }
+
+  /**
+   * Adds content only if required fields exist and id+lang is unique.
+   * @param {ContentFile} contentFile
+   */
+  #_addUniqueContent(contentFile) {
+    if (!(contentFile instanceof ContentFile)) {
+      return false;
+    }
+
+    const id = typeof contentFile.id === "string" ? contentFile.id.trim() : "";
+    const lang =
+      typeof contentFile.lang === "string" ? contentFile.lang.trim() : "";
+    const sourcePath =
+      typeof contentFile.sourcePath === "string" &&
+      contentFile.sourcePath.trim().length > 0
+        ? contentFile.sourcePath
+        : "unknown source";
+
+    /** @type {string[]} */
+    const missingFields = [];
+    if (!id) missingFields.push("id");
+    if (!lang) missingFields.push("lang");
+    if (missingFields.length > 0) {
+      _log.warn(
+        `[content] Skipped content: missing required field(s): ${missingFields.join(", ")} (${sourcePath})`,
+      );
+      return false;
+    }
+
+    const hasExisting = this.#_cache.some((entry) => {
+      const existingId = typeof entry.id === "string" ? entry.id.trim() : "";
+      const existingLang =
+        typeof entry.lang === "string" ? entry.lang.trim() : "";
+      return existingId === id && existingLang === lang;
+    });
+
+    if (hasExisting) {
+      return false;
+    }
+
+    this.#_cache.push(contentFile);
+    return true;
   }
 }
