@@ -1,4 +1,4 @@
-import { log as _log, plugin as _plugin } from "@shevky/base";
+import { i18n as _i18n, log as _log, plugin as _plugin } from "@shevky/base";
 import { PluginRegistry } from "../registries/pluginRegistry.js";
 import { ContentRegistry } from "../registries/contentRegistry.js";
 import { Project } from "../lib/project.js";
@@ -28,6 +28,11 @@ export class PluginEngine {
   #_metaEngine;
 
   /**
+   * @type {Record<string, any>}
+   */
+  #_runtimeContext = {};
+
+  /**
    * @param {PluginRegistry} pluginRegistry
    * @param {ContentRegistry} contentRegistry
    * @param {MetaEngine} metaEngine
@@ -36,6 +41,22 @@ export class PluginEngine {
     this.#_pluginRegistry = pluginRegistry;
     this.#_contentRegistry = contentRegistry;
     this.#_metaEngine = metaEngine;
+  }
+
+  /**
+   * @param {Record<string, any>} runtimeContext
+   * @returns {void}
+   */
+  setRuntimeContext(runtimeContext) {
+    this.#_runtimeContext =
+      runtimeContext && typeof runtimeContext === "object" ? runtimeContext : {};
+  }
+
+  /**
+   * @returns {void}
+   */
+  clearRuntimeContext() {
+    this.#_runtimeContext = {};
   }
 
   /**
@@ -82,6 +103,7 @@ export class PluginEngine {
     return {
       ...baseContext,
       paths: this.#_project.toObject(),
+      i18n: _i18n,
 
       // content:load
       ...(hook === _plugin.hooks.CONTENT_LOAD
@@ -98,6 +120,7 @@ export class PluginEngine {
             contentIndex: this.#_contentRegistry.buildContentIndex(),
           }
         : {}),
+      ...this.#_runtimeContext,
     };
   }
 }

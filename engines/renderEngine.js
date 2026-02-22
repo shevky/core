@@ -16,6 +16,33 @@ import { PageRegistry } from "../registries/pageRegistry.js";
 
 /** @typedef {import("../types/index.d.ts").Placeholder} Placeholder */
 
+const PAGINATED_SCHEMA_TYPE_RULES = {
+  home: "collection",
+};
+
+/** @param {unknown} value */
+function normalizeSchemaType(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().toLowerCase();
+}
+
+/** @param {unknown} schemaType @param {number} pageIndex */
+function resolvePaginatedSchemaType(schemaType, pageIndex) {
+  const normalizedType = normalizeSchemaType(schemaType);
+  if (!normalizedType) {
+    return "";
+  }
+
+  if (pageIndex <= 1) {
+    return normalizedType;
+  }
+
+  return PAGINATED_SCHEMA_TYPE_RULES[normalizedType] ?? normalizedType;
+}
+
 export class RenderEngine {
   /**
    * @type {TemplateRegistry}
@@ -436,6 +463,14 @@ export class RenderEngine {
         frontForPage.collectionType = collectionType;
       }
 
+      const paginatedSchemaType = resolvePaginatedSchemaType(
+        frontForPage.schemaType,
+        pageIndex,
+      );
+      if (paginatedSchemaType) {
+        frontForPage.schemaType = paginatedSchemaType;
+      }
+
       const renderedContent = await renderContentTemplate(
         templateName,
         contentHtml,
@@ -445,7 +480,11 @@ export class RenderEngine {
         listing,
       );
 
-      const pageMeta = metaEngine.buildPageMeta(frontForPage, lang, pageSlug);
+      const pageMeta = await metaEngine.buildPageMeta(
+        frontForPage,
+        lang,
+        pageSlug,
+      );
       const activeMenuKey = menuEngine.resolveActiveMenuKey(frontForPage);
       const view = buildViewPayload({
         lang,
@@ -687,7 +726,7 @@ export class RenderEngine {
             lang,
             dictionary,
           );
-          const pageMeta = metaEngine.buildPageMeta(front, lang, slug);
+          const pageMeta = await metaEngine.buildPageMeta(front, lang, slug);
           const layoutName = "default";
           const activeMenuKey = menuEngine.resolveActiveMenuKey(front);
           const view = buildViewPayload({
@@ -812,14 +851,7 @@ export class RenderEngine {
 
 /** @param {Record<string, any> | { raw?: unknown } | null | undefined} front */
 function normalizeFrontMatter(front) {
-  if (!front || typeof front !== "object") {
-    return {};
-  }
-
-  const raw =
-    "raw" in front && front.raw && typeof front.raw === "object"
-      ? front.raw
-      : front;
-
-  return typeof raw === "object" && raw !== null ? { ...raw } : {};
+  const frontRecord = _fmt.toRecord(front);
+  const rawRecord = _fmt.pickFirstRecord(frontRecord?.raw, frontRecord);
+  return rawRecord ? { ...rawRecord } : {};
 }

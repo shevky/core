@@ -145,16 +145,9 @@ function normalizeLogPath(pathValue) {
 
 /** @param {FrontMatter | { raw?: unknown } | null | undefined} front */
 function normalizeFrontMatter(front) {
-  if (!front || typeof front !== "object") {
-    return {};
-  }
-
-  const raw =
-    "raw" in front && front.raw && typeof front.raw === "object"
-      ? front.raw
-      : front;
-
-  return typeof raw === "object" && raw !== null ? { ...raw } : {};
+  const frontRecord = _fmt.toRecord(front);
+  const rawRecord = _fmt.pickFirstRecord(frontRecord?.raw, frontRecord);
+  return rawRecord ? { ...rawRecord } : {};
 }
 
 async function ensureDist() {
@@ -196,16 +189,14 @@ function injectAlternateLocaleMeta(html, locales) {
 function resolvePaginationSegment(lang) {
   /** @type {Record<string, string>} */
   const segmentConfig = _cfg?.content?.pagination?.segment ?? {};
-  if (
-    typeof segmentConfig[lang] === "string" &&
-    segmentConfig[lang].trim().length > 0
-  ) {
-    return segmentConfig[lang].trim();
+  const langSegment = _fmt.text(segmentConfig[lang]);
+  if (langSegment) {
+    return langSegment;
   }
 
-  const defaultSegment = segmentConfig[_i18n.default];
-  if (typeof defaultSegment === "string" && defaultSegment.trim().length > 0) {
-    return defaultSegment.trim();
+  const defaultSegment = _fmt.text(segmentConfig[_i18n.default]);
+  if (defaultSegment) {
+    return defaultSegment;
   }
 
   return "page";
@@ -508,12 +499,12 @@ async function renderFragmentTemplate(
   templateName,
   listingOverride,
 ) {
-  const template =
-    typeof templateName === "string" && templateName.trim().length > 0
-      ? templateRegistry.getTemplate(TYPE_TEMPLATE, templateName.trim())
-      : null;
-  if (templateName && !template) {
-    _log.warn(`[build] Fragment template not found: ${templateName}`);
+  const resolvedTemplateName = _fmt.text(templateName);
+  const template = resolvedTemplateName
+    ? templateRegistry.getTemplate(TYPE_TEMPLATE, resolvedTemplateName)
+    : null;
+  if (resolvedTemplateName && !template) {
+    _log.warn(`[build] Fragment template not found: ${resolvedTemplateName}`);
   }
   const {
     normalizedFront,
@@ -523,7 +514,7 @@ async function renderFragmentTemplate(
     languageFlags,
     resolvedDictionary,
   } = buildContentRenderContext(front, lang, dictionary, listingOverride);
-  const decorated = decorateHtml(contentHtml, templateName ?? "");
+  const decorated = decorateHtml(contentHtml, resolvedTemplateName);
   const templateContent = template?.content ?? "{{{content.html}}}";
 
   return Mustache.render(
@@ -560,8 +551,7 @@ function buildContentRenderContext(front, lang, dictionary, listingOverride) {
   /** @type {string[]} */
   const normalizedTags = Array.isArray(front.tags)
     ? front.tags.filter(
-        (/** @type {string} */ tag) =>
-          typeof tag === "string" && tag.trim().length > 0,
+        (/** @type {string} */ tag) => _fmt.hasText(tag),
       )
     : [];
   const tagLinks = normalizedTags
@@ -570,10 +560,8 @@ function buildContentRenderContext(front, lang, dictionary, listingOverride) {
       return url ? { label: tag, url } : null;
     })
     .filter(Boolean);
-  const categorySlug =
-    typeof front.category === "string" && front.category.trim().length > 0
-      ? _fmt.slugify(front.category)
-      : "";
+  const categoryLabel = _fmt.text(front.category);
+  const categorySlug = categoryLabel ? _fmt.slugify(categoryLabel) : "";
   const categoryUrl = categorySlug
     ? metaEngine.buildContentUrl(null, lang, categorySlug)
     : null;
@@ -584,10 +572,7 @@ function buildContentRenderContext(front, lang, dictionary, listingOverride) {
     tagLinks,
     hasTags: normalizedTags.length > 0,
     categoryUrl,
-    categoryLabel:
-      typeof front.category === "string" && front.category.trim().length > 0
-        ? front.category.trim()
-        : "",
+    categoryLabel,
     dateDisplay: _fmt.date(front.date, lang),
     updatedDisplay: _fmt.date(front.updated, lang),
     cover: front.cover ?? DEFAULT_IMAGE,
@@ -633,23 +618,20 @@ async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
     minifyHtml,
   });
   const relativePath = buildOutputPath(front, lang, slug);
+  const templateName = _fmt.text(front?.template);
+  const pageType = _fmt.text(writeMeta?.type) || templateName;
   const page = renderEngine.createPage({
     kind: "page",
-    type:
-      typeof writeMeta?.type === "string" && writeMeta.type.length > 0
-        ? writeMeta.type
-        : typeof front?.template === "string"
-          ? front.template
-          : "",
+    type: pageType,
     lang,
     slug,
     canonical: metaEngine.buildContentUrl(front?.canonical, lang, slug),
     layout: layoutName,
-    template: typeof front?.template === "string" ? front.template : "",
+    template: templateName,
     front,
     view,
     html: finalHtml,
-    sourcePath: typeof writeMeta?.source === "string" ? writeMeta.source : "",
+    sourcePath: _fmt.text(writeMeta?.source),
     outputPath: relativePath,
     writeMeta,
   });
@@ -698,6 +680,151 @@ function toPosixPath(value) {
   return value.split(_io.path.separator).join("/");
 }
 
+/** @param {FrontMatter | { header?: FrontMatter } | null | undefined} input */
+function resolveFrontMatterInput(input) {
+  const inputRecord = _fmt.toRecord(input);
+  const resolved = _fmt.pickFirstRecord(
+    inputRecord?.raw,
+    inputRecord?.header,
+    inputRecord,
+  );
+  return /** @type {FrontMatter} */ (resolved ?? {});
+}
+
+/** @param {unknown} value */
+function normalizeSchemaTypeValue(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().toLowerCase();
+}
+
+/**
+ * @param {Record<string, any> | null | undefined} front
+ * @param {Record<string, any> | null | undefined} [derived]
+ */
+function resolveSchemaTypeForGeneration(front, derived) {
+  const frontSchemaType = normalizeSchemaTypeValue(front?.schemaType);
+  if (_plugin.isSchemaType(frontSchemaType)) {
+    return frontSchemaType;
+  }
+
+  const derivedSchemaType = normalizeSchemaTypeValue(derived?.schemaType);
+  if (_plugin.isSchemaType(derivedSchemaType)) {
+    return derivedSchemaType;
+  }
+
+  const collectionType = normalizeCollectionTypeValue(
+    front?.collectionType ?? derived?.collectionType,
+  );
+  if (collectionType) {
+    return "collection";
+  }
+
+  return "page";
+}
+
+/**
+ * @param {Record<string, any> | null | undefined} front
+ * @param {Record<string, any> | null | undefined} [derived]
+ */
+function injectSchemaTypeForGeneration(front, derived) {
+  if (!front || typeof front !== "object") {
+    return;
+  }
+
+  const resolvedType = resolveSchemaTypeForGeneration(front, derived);
+  const currentFrontType = normalizeSchemaTypeValue(front.schemaType);
+
+  if (!_plugin.isSchemaType(currentFrontType)) {
+    try {
+      front.schemaType = resolvedType;
+    } catch {
+      // Ignore read-only objects.
+    }
+  }
+
+  if (derived && typeof derived === "object") {
+    const currentDerivedType = normalizeSchemaTypeValue(derived.schemaType);
+    if (!_plugin.isSchemaType(currentDerivedType)) {
+      try {
+        derived.schemaType = resolvedType;
+      } catch {
+        // Ignore read-only objects.
+      }
+    }
+  }
+}
+
+/** @param {FrontMatter} front @param {string} lang @param {string} slug */
+function buildMinimalPageMeta(front, lang, slug) {
+  const canonical = metaEngine.resolveUrl(
+    _fmt.text(front?.canonical) ||
+      metaEngine.buildContentUrl(null, lang, slug),
+  );
+  const alternates = metaEngine.buildAlternateUrlMap(front, lang, canonical);
+  const alternateLinks = metaEngine.buildAlternateLinkList(alternates);
+
+  return {
+    title: _fmt.text(front?.metaTitle) || _fmt.text(front?.title),
+    description: _fmt.text(front?.description),
+    robots: _fmt.text(front?.robots) || "index,follow",
+    canonical,
+    alternates,
+    alternateLinks,
+    og: _fmt.toRecord(front?.og, {}),
+    twitter: _fmt.toRecord(front?.twitter, {}),
+    structuredData: front?.structuredData ?? "",
+  };
+}
+
+/** @param {FrontMatter | { header?: FrontMatter } | null | undefined} input @param {string} lang @param {string} slug @param {Record<string, any> | null | undefined} [derived] */
+async function buildPageMetaWithPlugins(input, lang, slug, derived) {
+  const front = resolveFrontMatterInput(input);
+  const derivedFront =
+    derived && typeof derived === "object"
+      ? /** @type {Record<string, any>} */ (derived)
+      : front;
+  injectSchemaTypeForGeneration(front, derivedFront);
+  let pluginPageMeta = null;
+
+  pluginEngine.setRuntimeContext({
+    frontMatter: front,
+    derivedFrontMatter: derivedFront,
+    lang,
+    slug,
+    setPageMeta: (/** @type {Record<string, any>} */ meta) => {
+      pluginPageMeta = meta;
+    },
+  });
+
+  try {
+    await pluginEngine.execute(_plugin.hooks.PAGE_META);
+  } finally {
+    pluginEngine.clearRuntimeContext();
+  }
+
+  if (
+    pluginPageMeta &&
+    typeof pluginPageMeta === "object" &&
+    !Array.isArray(pluginPageMeta)
+  ) {
+    return /** @type {Record<string, any>} */ (pluginPageMeta);
+  }
+
+  const existingPageMeta = _fmt.toRecord(front?.pageMeta);
+  if (existingPageMeta) {
+    return existingPageMeta;
+  }
+
+  _log.debug(
+    `[build] Missing page meta from '${_plugin.hooks.PAGE_META}' hook for lang='${lang}' slug='${slug}'. Using front matter as page meta.`,
+  );
+
+  return buildMinimalPageMeta(front, lang, slug);
+}
+
 /** @param {FrontMatter} front @param {string} lang */
 function buildCollectionListing(front, lang) {
   const normalizedLang = lang ?? _i18n.default;
@@ -724,19 +851,13 @@ function buildCollectionListing(front, lang) {
 function buildSeriesListing(front, lang) {
   /** @type {string[]} */
   const relatedSource = Array.isArray(front?.related) ? front.related : [];
-  const seriesName =
-    typeof front?.seriesTitle === "string" &&
-    front.seriesTitle.trim().length > 0
-      ? front.seriesTitle.trim()
-      : typeof front?.series === "string"
-        ? front.series.trim()
-        : "";
-  const currentId = typeof front?.id === "string" ? front.id.trim() : "";
+  const seriesName = _fmt.text(front?.seriesTitle) || _fmt.text(front?.series);
+  const currentId = _fmt.text(front?.id);
   /** @type {Array<{ id: string, label: string, url: string, hasUrl?: boolean, isCurrent: boolean, isPlaceholder: boolean }>} */
   const items = [];
 
   relatedSource.forEach((/** @type {string} */ entry) => {
-    const value = typeof entry === "string" ? entry.trim() : "";
+    const value = _fmt.text(entry);
     if (!value) {
       items.push({
         id: "",
@@ -805,18 +926,17 @@ function resolveCollectionType(front, items, fallback) {
 
   if (Array.isArray(items)) {
     const entryWithType = items.find(
-      (entry) =>
-        typeof entry?.type === "string" && entry.type.trim().length > 0,
+      (entry) => _fmt.hasText(entry?.type),
     );
-    const entryType =
-      typeof entryWithType?.type === "string" ? entryWithType.type.trim() : "";
+    const entryType = _fmt.text(entryWithType?.type);
     if (entryType) {
       return entryType.toLowerCase();
     }
   }
 
-  if (typeof fallback === "string" && fallback.trim().length > 0) {
-    return fallback.trim().toLowerCase();
+  const normalizedFallback = _fmt.text(fallback);
+  if (normalizedFallback) {
+    return normalizedFallback.toLowerCase();
   }
 
   return "";
@@ -858,20 +978,23 @@ function resolveListingKey(front) {
 function resolveListingEmpty(front, lang) {
   if (!front) return "";
   const { listingEmpty } = front;
-  if (typeof listingEmpty === "string" && listingEmpty.trim().length > 0) {
-    return listingEmpty.trim();
+  const direct = _fmt.text(listingEmpty);
+  if (direct) {
+    return direct;
   }
   if (listingEmpty && typeof listingEmpty === "object") {
     const listingEmptyMap = /** @type {Record<string, string>} */ (
       listingEmpty
     );
     const localized = listingEmptyMap[lang];
-    if (typeof localized === "string" && localized.trim().length > 0) {
-      return localized.trim();
+    const localizedValue = _fmt.text(localized);
+    if (localizedValue) {
+      return localizedValue;
     }
     const fallback = listingEmptyMap[_i18n.default];
-    if (typeof fallback === "string" && fallback.trim().length > 0) {
-      return fallback.trim();
+    const fallbackValue = _fmt.text(fallback);
+    if (fallbackValue) {
+      return fallbackValue;
     }
   }
   return "";
@@ -880,16 +1003,7 @@ function resolveListingEmpty(front, lang) {
 /** @param {FrontMatter} front */
 function resolveListingHeading(front) {
   if (!front) return "";
-  if (
-    typeof front.listHeading === "string" &&
-    front.listHeading.trim().length > 0
-  ) {
-    return front.listHeading.trim();
-  }
-  if (typeof front.title === "string" && front.title.trim().length > 0) {
-    return front.title.trim();
-  }
-  return "";
+  return _fmt.text(front.listHeading) || _fmt.text(front.title);
 }
 
 async function buildContentPages() {
@@ -932,10 +1046,7 @@ async function buildContentPages() {
     const rawFront = normalizeFrontMatter(file.header);
     const shouldBuildFragment = _fmt.boolean(rawFront.fragment);
     const fragmentTemplateName =
-      typeof rawFront.fragmentTemplate === "string" &&
-      rawFront.fragmentTemplate.trim().length > 0
-        ? rawFront.fragmentTemplate.trim()
-        : file.template;
+      _fmt.text(rawFront.fragmentTemplate) || file.template;
 
     if (file.template === "collection" || file.template === "home") {
       await renderEngine.buildPaginatedCollectionPages({
@@ -960,7 +1071,15 @@ async function buildContentPages() {
             buildEasterEggPayload,
           }),
         renderPage,
-        metaEngine,
+        metaEngine: {
+          buildPageMeta: async (frontForPage, pageLang, pageSlug) =>
+            buildPageMetaWithPlugins(
+              frontForPage,
+              pageLang,
+              pageSlug,
+              frontForPage,
+            ),
+        },
         menuEngine,
         resolveListingKey,
         resolveListingEmpty,
@@ -981,10 +1100,11 @@ async function buildContentPages() {
       file.lang,
       dictionary,
     );
-    const pageMeta = metaEngine.buildPageMeta(
+    const pageMeta = await buildPageMetaWithPlugins(
       file.header,
       file.lang,
       file.slug,
+      file,
     );
     const activeMenuKey = menuEngine.resolveActiveMenuKey(file.header);
     const view = renderEngine.buildViewPayload(
@@ -1044,9 +1164,7 @@ async function buildContentPages() {
           },
         );
         const fragmentLang =
-          typeof file.lang === "string" && file.lang.trim().length > 0
-            ? file.lang.trim()
-            : _i18n.default;
+          _fmt.text(file.lang) || _i18n.default;
         const fragmentPath = _io.path.combine(
           FRAGMENTS_DIR,
           fragmentLang,
@@ -1081,7 +1199,10 @@ async function buildContentPages() {
         buildEasterEggPayload,
       }),
     renderPage,
-    metaEngine,
+    metaEngine: {
+      buildPageMeta: async (frontForPage, pageLang, pageSlug) =>
+        buildPageMetaWithPlugins(frontForPage, pageLang, pageSlug, frontForPage),
+    },
     menuEngine,
     resolveCollectionType,
     normalizeCollectionTypeValue,
@@ -1098,14 +1219,9 @@ function resolveCollectionDisplayKey(configKey, defaultKey, items) {
   if (configKey === "series" && Array.isArray(items)) {
     const entryWithTitle = items.find(
       (entry) =>
-        entry &&
-        typeof entry.seriesTitle === "string" &&
-        entry.seriesTitle.trim().length > 0,
+        entry && _fmt.hasText(entry.seriesTitle),
     );
-    const seriesTitle =
-      typeof entryWithTitle?.seriesTitle === "string"
-        ? entryWithTitle.seriesTitle.trim()
-        : "";
+    const seriesTitle = _fmt.text(entryWithTitle?.seriesTitle);
     if (seriesTitle) {
       return seriesTitle;
     }

@@ -124,7 +124,7 @@ export class ContentRegistry {
         !file.isValid ||
         file.isDraft ||
         !file.isPublished ||
-        file.category !== "policy"
+        file.schemaType !== "policy"
       ) {
         continue;
       }

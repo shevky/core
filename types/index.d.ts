@@ -55,6 +55,13 @@ export interface PluginExecutionContext extends BasePluginContext {
     Record<string, { id: string; lang: string; title: string; canonical: string }>
   >;
   footerPolicies?: Record<string, FooterPolicy[]>;
+  i18n?: Record<string, any>;
+  frontMatter?: FrontMatter;
+  derivedFrontMatter?: FrontMatter | Record<string, any>;
+  lang?: string;
+  slug?: string;
+  pageMeta?: Record<string, any> | null;
+  setPageMeta?: (meta: Record<string, any>) => void;
 }
 
 export type Placeholder = {
