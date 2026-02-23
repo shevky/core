@@ -4,7 +4,7 @@ import _cli from "./cli.js";
 import _build from "./build.js";
 import _init from "./init.js";
 
-const VERSION = "0.0.7";
+const VERSION = "0.0.8";
 
 const __filename = _io.url.toPath(import.meta.url);
 const __dirname = _io.path.name(__filename);
