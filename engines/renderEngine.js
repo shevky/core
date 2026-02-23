@@ -208,7 +208,7 @@ export class RenderEngine {
    *  layout: string,
    *  template?: string,
    *  front: Record<string, unknown>,
-   *  view: Record<string, unknown>,
+   *  view?: Record<string, unknown>,
    *  html: string,
    *  sourcePath?: string,
    *  outputPath?: string,

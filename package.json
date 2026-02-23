@@ -1,6 +1,6 @@
 {
   "name": "@shevky/core",
-  "version": "0.0.7/home/fatihtatoglu/workspace/shevky/base",
+  "version": "0.0.8",
   "description": "A minimal, dependency-light static site generator.",
   "type": "module",
   "main": "shevky.js",
@@ -36,12 +36,15 @@
   },
   "homepage": "https://github.com/shevky/core#readme",
   "dependencies": {
-    "@shevky/base": "/home/fatihtatoglu/workspace/shevky/base/",
-    "@types/node": "^20.11.30",
-    "@types/mustache": "^4.2.6",
-    "@types/html-minifier-terser": "^7.0.2",
+    "@shevky/base": "^0.0.5",
     "@tailwindcss/typography": "^0.5.19",
+    "@types/html-minifier-terser": "^7.0.2",
+    "@types/mustache": "^4.2.6",
+    "@types/node": "^20.11.30",
     "autoprefixer": "^10.4.21",
+    "command-line-args": "^6.0.1",
+    "command-line-usage": "^7.0.3",
+    "degit": "^2.8.4",
     "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
     "html-minifier-terser": "^6.1.0",
@@ -49,10 +52,7 @@
     "marked-highlight": "^2.2.3",
     "mustache": "^4.2.0",
     "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.14",
-    "command-line-args": "^6.0.1",
-    "command-line-usage": "^7.0.3",
-    "degit": "^2.8.4"
+    "tailwindcss": "^4.1.14"
   },
   "engines": {
     "node": ">=18"

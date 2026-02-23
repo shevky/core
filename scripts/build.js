@@ -86,6 +86,7 @@ const DEFAULT_IMAGE = _cfg.seo.defaultImage;
 const FALLBACK_TAGLINES = { tr: "-", en: "-" };
 /** @type {Record<string, any>} */
 const COLLECTION_CONFIG = _cfg.content.collections;
+const PAGE_BUFFER_LIMIT = resolvePageBufferLimit();
 
 const GENERATED_PAGES = new Set();
 
@@ -243,7 +244,17 @@ async function writeHtmlFile(relativePath, html, meta = {}) {
   });
 }
 
-async function flushPages() {
+/** @param {{ force?: boolean }} [options] */
+async function flushPages(options = {}) {
+  const force = _fmt.boolean(options.force);
+  if (pageRegistry.count === 0) {
+    return;
+  }
+
+  if (!force && pageRegistry.count < PAGE_BUFFER_LIMIT) {
+    return;
+  }
+
   const pages = pageRegistry
     .list()
     .sort((a, b) => (a.outputPath || "").localeCompare(b.outputPath || ""));
@@ -253,6 +264,7 @@ async function flushPages() {
     }
     await writeHtmlFile(page.outputPath, page.html, page.writeMeta ?? {});
   }
+  pageRegistry.clear();
 }
 
 /** @param {string} html @param {string} langKey */
@@ -550,9 +562,7 @@ function buildContentRenderContext(front, lang, dictionary, listingOverride) {
   const baseFront = normalizeFrontMatter(front);
   /** @type {string[]} */
   const normalizedTags = Array.isArray(front.tags)
-    ? front.tags.filter(
-        (/** @type {string} */ tag) => _fmt.hasText(tag),
-      )
+    ? front.tags.filter((/** @type {string} */ tag) => _fmt.hasText(tag))
     : [];
   const tagLinks = normalizedTags
     .map((/** @type {string} */ tag) => {
@@ -620,6 +630,10 @@ async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
   const relativePath = buildOutputPath(front, lang, slug);
   const templateName = _fmt.text(front?.template);
   const pageType = _fmt.text(writeMeta?.type) || templateName;
+  const collectionType = normalizeCollectionTypeValue(front?.collectionType);
+  const slimFront = collectionType
+    ? /** @type {FrontMatter} */ ({ collectionType })
+    : /** @type {FrontMatter} */ ({});
   const page = renderEngine.createPage({
     kind: "page",
     type: pageType,
@@ -628,8 +642,7 @@ async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
     canonical: metaEngine.buildContentUrl(front?.canonical, lang, slug),
     layout: layoutName,
     template: templateName,
-    front,
-    view,
+    front: slimFront,
     html: finalHtml,
     sourcePath: _fmt.text(writeMeta?.source),
     outputPath: relativePath,
@@ -637,6 +650,7 @@ async function renderPage({ layoutName, view, front, lang, slug, writeMeta }) {
   });
   GENERATED_PAGES.add(toPosixPath(relativePath));
   registerLegacyPaths(lang, slug);
+  await flushPages();
   return page;
 }
 
@@ -760,8 +774,7 @@ function injectSchemaTypeForGeneration(front, derived) {
 /** @param {FrontMatter} front @param {string} lang @param {string} slug */
 function buildMinimalPageMeta(front, lang, slug) {
   const canonical = metaEngine.resolveUrl(
-    _fmt.text(front?.canonical) ||
-      metaEngine.buildContentUrl(null, lang, slug),
+    _fmt.text(front?.canonical) || metaEngine.buildContentUrl(null, lang, slug),
   );
   const alternates = metaEngine.buildAlternateUrlMap(front, lang, canonical);
   const alternateLinks = metaEngine.buildAlternateLinkList(alternates);
@@ -925,9 +938,7 @@ function resolveCollectionType(front, items, fallback) {
   }
 
   if (Array.isArray(items)) {
-    const entryWithType = items.find(
-      (entry) => _fmt.hasText(entry?.type),
-    );
+    const entryWithType = items.find((entry) => _fmt.hasText(entry?.type));
     const entryType = _fmt.text(entryWithType?.type);
     if (entryType) {
       return entryType.toLowerCase();
@@ -1004,6 +1015,94 @@ function resolveListingEmpty(front, lang) {
 function resolveListingHeading(front) {
   if (!front) return "";
   return _fmt.text(front.listHeading) || _fmt.text(front.title);
+}
+
+function resolvePageBufferLimit() {
+  const envValue = Number.parseInt(
+    process.env.SHEVKY_PAGE_BUFFER_LIMIT ?? "",
+    10,
+  );
+
+  if (Number.isFinite(envValue) && envValue > 0) {
+    return envValue;
+  }
+
+  const configValue = Number.parseInt(
+    String(_cfg?.build?.pageBufferLimit ?? ""),
+    10,
+  );
+
+  if (Number.isFinite(configValue) && configValue > 0) {
+    return configValue;
+  }
+
+  return 20;
+}
+
+/** @param {unknown} value */
+function resolveAliasOutputPath(value) {
+  const raw = _fmt.text(value);
+  if (!raw) {
+    return null;
+  }
+
+  const relative = metaEngine.canonicalToRelativePath(raw);
+  if (relative) {
+    const lastSegment = relative.split("/").pop()?.trim() ?? "";
+    if (lastSegment.includes(".")) {
+      return relative;
+    }
+    return _io.path.combine(relative, "index.html");
+  }
+
+  const normalizedRaw = raw.trim();
+  if (
+    normalizedRaw === "/" ||
+    normalizedRaw === "~/" ||
+    /^https?:\/\/[^/]+\/?$/i.test(normalizedRaw)
+  ) {
+    return "index.html";
+  }
+
+  return null;
+}
+
+async function applyOutputAliases() {
+  const aliases = Array.isArray(_cfg?.build?.outputAliases)
+    ? _cfg.build.outputAliases
+    : [];
+
+  for (const entry of aliases) {
+    const alias = _fmt.toRecord(entry);
+    if (!alias) {
+      continue;
+    }
+
+    const sourceRelative = resolveAliasOutputPath(alias.from);
+    const targetRelative = resolveAliasOutputPath(alias.to);
+    if (!sourceRelative || !targetRelative || sourceRelative === targetRelative) {
+      continue;
+    }
+
+    const sourcePath = _io.path.combine(DIST_DIR, sourceRelative);
+    if (!(await _io.file.exists(sourcePath))) {
+      _log.warn(
+        `[build] Output alias source not found: ${normalizeLogPath(sourcePath)}`,
+      );
+      continue;
+    }
+
+    const targetPath = _io.path.combine(DIST_DIR, targetRelative);
+    await _io.directory.create(_io.path.name(targetPath));
+    await _io.file.copy(sourcePath, targetPath);
+    GENERATED_PAGES.add(toPosixPath(targetRelative));
+
+    _log.step("COPY_ALIAS", {
+      source: normalizeLogPath(sourcePath),
+      target: normalizeLogPath(targetPath),
+      type: "alias",
+    });
+  }
 }
 
 async function buildContentPages() {
@@ -1163,8 +1262,7 @@ async function buildContentPages() {
             minifyHtml,
           },
         );
-        const fragmentLang =
-          _fmt.text(file.lang) || _i18n.default;
+        const fragmentLang = _fmt.text(file.lang) || _i18n.default;
         const fragmentPath = _io.path.combine(
           FRAGMENTS_DIR,
           fragmentLang,
@@ -1201,7 +1299,12 @@ async function buildContentPages() {
     renderPage,
     metaEngine: {
       buildPageMeta: async (frontForPage, pageLang, pageSlug) =>
-        buildPageMetaWithPlugins(frontForPage, pageLang, pageSlug, frontForPage),
+        buildPageMetaWithPlugins(
+          frontForPage,
+          pageLang,
+          pageSlug,
+          frontForPage,
+        ),
     },
     menuEngine,
     resolveCollectionType,
@@ -1218,8 +1321,7 @@ async function buildContentPages() {
 function resolveCollectionDisplayKey(configKey, defaultKey, items) {
   if (configKey === "series" && Array.isArray(items)) {
     const entryWithTitle = items.find(
-      (entry) =>
-        entry && _fmt.hasText(entry.seriesTitle),
+      (entry) => entry && _fmt.hasText(entry.seriesTitle),
     );
     const seriesTitle = _fmt.text(entryWithTitle?.seriesTitle);
     if (seriesTitle) {
@@ -1278,6 +1380,14 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
   for (const entry of entries) {
     const fullPath = _io.path.combine(currentDir, entry);
     const relPath = relative ? _io.path.combine(relative, entry) : entry;
+    const normalizedRelPath = toPosixPath(relPath);
+
+    if (
+      normalizedRelPath === "content" ||
+      normalizedRelPath.startsWith("content/")
+    ) {
+      continue;
+    }
 
     if (!entry.endsWith(".html")) {
       continue;
@@ -1325,6 +1435,83 @@ async function copyHtmlRecursive(currentDir = SRC_DIR, relative = "") {
   }
 }
 
+/** @param {string} currentDir */
+async function copyContentStaticRecursive(currentDir = CONTENT_DIR) {
+  if (!(await _io.directory.exists(currentDir))) {
+    return;
+  }
+
+  const contentRootDirectories = resolveContentRootDirectories();
+  const entries = await _io.directory.read(currentDir);
+  for (const entry of entries) {
+    const fullPath = _io.path.combine(currentDir, entry);
+    const relPath = entry;
+    const normalizedRelPath = toPosixPath(relPath);
+    const isXml = entry.endsWith(".xml");
+
+    if (
+      contentRootDirectories.some(
+        (directory) =>
+          normalizedRelPath === directory ||
+          normalizedRelPath.startsWith(`${directory}/`),
+      )
+    ) {
+      continue;
+    }
+
+    if (!(entry.endsWith(".html") || entry.endsWith(".xml"))) {
+      continue;
+    }
+
+    if (GENERATED_PAGES.has(toPosixPath(relPath))) {
+      continue;
+    }
+
+    const raw = await _io.file.read(fullPath);
+    const transformed = isXml
+      ? raw
+      : await renderEngine.transformHtml(raw, {
+          versionToken,
+          minifyHtml,
+        });
+
+    await writeHtmlFile(relPath, transformed, {
+      action: "COPY_HTML",
+      type: isXml ? "content-xml" : "content-static",
+      source: fullPath,
+      lang: _i18n.default,
+      inputBytes: byteLength(transformed),
+    });
+  }
+}
+
+function resolveContentRootDirectories() {
+  const configured = Array.isArray(_cfg?.build?.contentRootDirectories)
+    ? _cfg.build.contentRootDirectories
+    : [".well-known"];
+
+  return [...new Set(configured.map((entry) => _fmt.text(entry)).filter(Boolean))];
+}
+
+async function copyContentRootDirectories() {
+  const directories = resolveContentRootDirectories();
+  for (const directory of directories) {
+    const sourceDir = _io.path.combine(CONTENT_DIR, directory);
+    if (!(await _io.directory.exists(sourceDir))) {
+      continue;
+    }
+
+    const targetDir = _io.path.combine(DIST_DIR, directory);
+    await _io.directory.copy(sourceDir, targetDir);
+
+    _log.step("COPY_DIR", {
+      source: normalizeLogPath(sourceDir),
+      target: normalizeLogPath(targetDir),
+      type: "content-root-directory",
+    });
+  }
+}
+
 async function copyStaticAssets() {
   if (!(await _io.directory.exists(ASSETS_DIR))) {
     return;
@@ -1359,7 +1546,10 @@ async function main() {
 
   await buildContentPages();
   await copyHtmlRecursive();
-  await flushPages();
+  await copyContentStaticRecursive();
+  await copyContentRootDirectories();
+  await flushPages({ force: true });
+  await applyOutputAliases();
 }
 
 const API = {
