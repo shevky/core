@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { io as _io, config as _cfg, log as _log } from "@shevky/base";
 import matter from "gray-matter";
 
@@ -334,7 +335,8 @@ export class ContentRegistry {
   }
 
   /**
-   * Adds content only if required fields exist and id+lang is unique.
+   * Adds or replaces content by id+lang.
+   * If duplicate payload is same -> ignore, if different -> replace with latest.
    * @param {ContentFile} contentFile
    */
   #_addUniqueContent(contentFile) {
@@ -362,18 +364,83 @@ export class ContentRegistry {
       return false;
     }
 
-    const hasExisting = this.#_cache.some((entry) => {
+    const existingIndex = this.#_cache.findIndex((entry) => {
       const existingId = typeof entry.id === "string" ? entry.id.trim() : "";
       const existingLang =
         typeof entry.lang === "string" ? entry.lang.trim() : "";
       return existingId === id && existingLang === lang;
     });
 
-    if (hasExisting) {
-      return false;
+    if (existingIndex !== -1) {
+      const currentEntry = this.#_cache[existingIndex];
+      const currentHash = this.#_buildContentHash(currentEntry);
+      const incomingHash = this.#_buildContentHash(contentFile);
+      if (currentHash === incomingHash) {
+        return false;
+      }
+
+      this.#_cache[existingIndex] = contentFile;
+      return true;
     }
 
     this.#_cache.push(contentFile);
     return true;
+  }
+
+  /**
+   * @param {ContentFile} contentFile
+   */
+  #_buildContentHash(contentFile) {
+    const payload = {
+      header: contentFile.header?.raw ?? {},
+      content: typeof contentFile.content === "string" ? contentFile.content : "",
+      isValid: Boolean(contentFile.isValid),
+    };
+
+    return crypto
+      .createHash("sha1")
+      .update(this.#_stableStringify(payload))
+      .digest("hex");
+  }
+
+  /**
+   * Stable stringify to avoid key-order differences in hash computation.
+   * @param {unknown} value
+   * @returns {string}
+   */
+  #_stableStringify(value) {
+    if (value === undefined) {
+      return '"__undefined__"';
+    }
+
+    if (value === null) {
+      return "null";
+    }
+
+    if (value instanceof Date) {
+      return JSON.stringify(value.toISOString());
+    }
+
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.#_stableStringify(item)).join(",")}]`;
+    }
+
+    if (typeof value !== "object") {
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        return JSON.stringify(String(value));
+      }
+      return JSON.stringify(value);
+    }
+
+    const entries = Object.keys(value)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${this.#_stableStringify(
+            /** @type {Record<string, unknown>} */ (value)[key],
+          )}`,
+      );
+
+    return `{${entries.join(",")}}`;
   }
 }
